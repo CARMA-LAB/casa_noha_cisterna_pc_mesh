@@ -178,8 +178,8 @@
           objMesh.visible = MESH_DEFAULT_VISIBLE;
 
           forceSafeMaterial(objMesh);
-          applyTransform(objMesh);
-          autoAlignToPointCloud(pcRef, objMesh);
+          applyTransform(objMesh); // lascialo pure, ma con scale=1 rot=0 off=0
+          // autoAlignToPointCloud(pcRef, objMesh); // <-- disattiva
 
           viewer.scene.scene.add(objMesh);
           registerInSceneTree("Cisterna – Mesh OBJ", objMesh);
