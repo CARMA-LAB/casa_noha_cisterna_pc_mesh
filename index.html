@@ -16,7 +16,6 @@
 
 <body>
 
-<!-- LIBS -->
 <script src="./libs/jquery/jquery-3.1.1.min.js"></script>
 <script src="./libs/spectrum/spectrum.js"></script>
 <script src="./libs/jquery-ui/jquery-ui.min.js"></script>
@@ -30,7 +29,6 @@
 <script src="./build/potree/potree.js"></script>
 <script src="./libs/plasio/js/laslaz.js"></script>
 
-<!-- CONTAINER -->
 <div class="potree_container" style="position:absolute; width:100%; height:100%; left:0; top:0;">
   <div id="potree_render_area"
        style="background-image:url('./build/potree/resources/images/NUOVO_LOGO_FAI.jpg');">
@@ -38,47 +36,50 @@
   <div id="potree_sidebar_container"></div>
 </div>
 
-<!-- ================= MODULE SCRIPT (come esempio) ================= -->
 <script type="module">
   import * as THREE from "./libs/three.js/build/three.module.js";
   import { OBJLoader } from "./libs/three.js/loaders/OBJLoader.js";
-  // se necessario:
+  // alternativa se serve:
   // import { OBJLoader } from "./libs/three.js/examples/jsm/loaders/OBJLoader.js";
 
-  /* =====================================================
+  /* =========================
      CONFIG
-  ===================================================== */
+  ========================= */
   const POINTCLOUD_PATH = "./pointclouds/metadata.json";
   const OBJ_PATH        = "./mesh/cisterna.obj";
 
-  const MESH_VISIBLE_DEFAULT = false;
+  const MESH_VISIBLE_DEFAULT = true; // mettila true per vedere subito e fare debug
+  // Offset handling:
+  // "none" = non applica offset (consigliato se prima erano allineate)
+  // "add"  = obj.position += offset
+  // "sub"  = obj.position -= offset
+  // "auto" = decide in base ai centri
+  const OFFSET_MODE = "auto";
 
-  //  Trasformazioni volutamente neutre
+  // trasformazioni neutre
   const MESH_SCALE  = 1.0;
   const MESH_ROT    = new THREE.Euler(0, 0, 0);
   const MESH_OFFSET = new THREE.Vector3(0, 0, 0);
 
-  /* =====================================================
+  /* =========================
      VIEWER
-  ===================================================== */
+  ========================= */
   window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
-
   viewer.setEDLEnabled(true);
   viewer.setFOV(60);
   viewer.setPointBudget(2_000_000);
   viewer.loadSettingsFromURL();
-
-  viewer.setDescription("CASA NOHA – Cisterna (Point Cloud + Mesh)");
+  viewer.setDescription("CASA NOHA – Cisterna (Point Cloud + OBJ)");
 
   viewer.loadGUI(() => {
     viewer.setLanguage("en");
-    $("#menu_scene").next().show();       // fondamentale per vedere il toggle mesh
+    $("#menu_scene").next().show();
     $("#menu_appearance").next().show();
   });
 
-  /* =====================================================
-     LIGHTS (necessarie per mesh)
-  ===================================================== */
+  /* =========================
+     LIGHTS
+  ========================= */
   {
     const dir = new THREE.DirectionalLight(0xffffff, 1.0);
     dir.position.set(10, 10, 10);
@@ -88,35 +89,35 @@
     viewer.scene.scene.add(amb);
   }
 
-  /* =====================================================
+  /* =========================
      POINT CLOUD
-  ===================================================== */
+  ========================= */
+  let pcRef = null;
   let pcOffset = new THREE.Vector3(0, 0, 0);
 
   Potree.loadPointCloud(POINTCLOUD_PATH, "Cisterna – Point Cloud", (e) => {
-    const pc = e.pointcloud;
+    pcRef = e.pointcloud;
 
-    viewer.scene.addPointCloud(pc);
+    viewer.scene.addPointCloud(pcRef);
 
-    pc.material.activeAttributeName = "rgba";
-    pc.material.pointSizeType = Potree.PointSizeType.FIXED;
-    pc.material.size = 2.0;
-    pc.material.minSize = 2;
+    pcRef.material.activeAttributeName = "rgba";
+    pcRef.material.pointSizeType = Potree.PointSizeType.FIXED;
+    pcRef.material.size = 2.0;
+    pcRef.material.minSize = 2;
 
-    //  OFFSET POTREE (causa del disallineamento)
-    if (pc.pcoGeometry && pc.pcoGeometry.offset) {
-      pcOffset = pc.pcoGeometry.offset.clone();
-      console.log("Potree offset:", pcOffset);
+    if (pcRef.pcoGeometry && pcRef.pcoGeometry.offset) {
+      pcOffset = pcRef.pcoGeometry.offset.clone();
     }
+    console.log("PC offset:", pcOffset);
 
     viewer.fitToScreen();
 
-    loadOBJ();   // mesh dopo la point cloud
+    loadOBJ();
   });
 
-  /* =====================================================
+  /* =========================
      OBJ MESH
-  ===================================================== */
+  ========================= */
   let objMesh = null;
 
   function applyTransform(obj) {
@@ -125,7 +126,7 @@
     obj.position.add(MESH_OFFSET);
   }
 
-  //  NON sostituisce materiali → non perdi texture
+  // NON sovrascrive i materiali: preserva texture/materiali se esistono
   function keepMaterials(obj) {
     obj.traverse((c) => {
       if (c.isMesh && c.material) {
@@ -153,9 +154,76 @@
     });
   }
 
+  function getCenterOfObject(obj) {
+    const box = new THREE.Box3().setFromObject(obj);
+    return box.getCenter(new THREE.Vector3());
+  }
+
+  function getPointCloudCenter(pc) {
+    // boundingBox è in coords locali della geometry; la trasformiamo in world
+    pc.updateMatrixWorld(true);
+    const box = pc.boundingBox.clone().applyMatrix4(pc.matrixWorld);
+    return box.getCenter(new THREE.Vector3());
+  }
+
+  function applyOffsetMode(obj) {
+    if (!pcRef) return;
+
+    if (OFFSET_MODE === "none") {
+      console.log("OFFSET_MODE=none (nessuna correzione offset)");
+      return;
+    }
+
+    if (OFFSET_MODE === "add") {
+      obj.position.add(pcOffset);
+      console.log("OFFSET_MODE=add");
+      return;
+    }
+
+    if (OFFSET_MODE === "sub") {
+      obj.position.sub(pcOffset);
+      console.log("OFFSET_MODE=sub");
+      return;
+    }
+
+    // AUTO:
+    // Idea: se OBJ è "vicino allo zero" e la PC è "vicino allo zero", NON applicare.
+    // Se uno dei due è in scala "grande" (es. UTM) e l'altro no, prova add/sub e sceglie quello che avvicina i centri.
+    const pcC  = getPointCloudCenter(pcRef);
+    const objC = getCenterOfObject(obj);
+
+    const baseDist = pcC.distanceTo(objC);
+
+    // prova sub
+    obj.position.sub(pcOffset);
+    obj.updateMatrixWorld(true);
+    const subDist = pcC.distanceTo(getCenterOfObject(obj));
+
+    // torna indietro e prova add
+    obj.position.add(pcOffset); // annulla sub
+    obj.position.add(pcOffset); // applica add
+    obj.updateMatrixWorld(true);
+    const addDist = pcC.distanceTo(getCenterOfObject(obj));
+
+    // ripristina alla posizione originale (annulla add)
+    obj.position.sub(pcOffset);
+
+    console.log("AUTO offset distances:", { baseDist, subDist, addDist });
+
+    // scegli la migliore
+    if (subDist < baseDist && subDist <= addDist) {
+      obj.position.sub(pcOffset);
+      console.log("AUTO chose: sub(offset)");
+    } else if (addDist < baseDist && addDist < subDist) {
+      obj.position.add(pcOffset);
+      console.log("AUTO chose: add(offset)");
+    } else {
+      console.log("AUTO chose: none (offset non applicato)");
+    }
+  }
+
   function loadOBJ() {
     const loader = new OBJLoader();
-
     loader.load(
       OBJ_PATH,
       (object) => {
@@ -165,14 +233,19 @@
         keepMaterials(objMesh);
         applyTransform(objMesh);
 
-        // ALLINEAMENTO CORRETTO:
-        // la mesh viene portata nello stesso sistema locale della point cloud
-        objMesh.position.sub(pcOffset);
+        // ✅ correzione offset: AUTO / NONE / ADD / SUB
+        applyOffsetMode(objMesh);
 
         viewer.scene.scene.add(objMesh);
         registerInSceneTree("Cisterna – Mesh OBJ", objMesh);
 
-        console.log("OBJ loaded correctly (offset applied)");
+        // log utili
+        if (pcRef) {
+          console.log("PC center:", getPointCloudCenter(pcRef));
+          console.log("OBJ center:", getCenterOfObject(objMesh));
+        }
+
+        console.log("OBJ loaded:", objMesh);
       },
       undefined,
       (err) => console.error("Errore caricamento OBJ:", err)
