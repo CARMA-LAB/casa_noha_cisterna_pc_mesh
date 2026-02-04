@@ -37,11 +37,13 @@
     <div id="potree_sidebar_container"></div>
   </div>
 
-  <!-- ✅ MODULE SCRIPT (come l'esempio) -->
+  <!-- ✅ MODULE SCRIPT (basato sull'esempio) -->
   <script type="module">
     import * as THREE from "./libs/three.js/build/three.module.js";
+
+    // Path A (come il tuo esempio). Se dà errore di import, commenta questa e usa la Path B.
     import { OBJLoader } from "./libs/three.js/loaders/OBJLoader.js";
-    // Se non esiste questa path, prova:
+    // Path B (alternativa comune):
     // import { OBJLoader } from "./libs/three.js/examples/jsm/loaders/OBJLoader.js";
 
     // -----------------------------
@@ -50,13 +52,13 @@
     const POINTCLOUD_PATH = "./pointclouds/metadata.json";
     const OBJ_PATH = "./mesh/cisterna.obj";
 
-    // Mesh: OFF di default (come richiesto)
+    // Mesh: OFF di default
     const MESH_DEFAULT_VISIBLE = false;
 
-    // Parametri di fino (se non la vedi subito)
-    const MESH_SCALE  = 1.0;                                // prova 0.001 o 1000
-    const MESH_ROT    = new THREE.Euler(0, 0, 0);            // es. new THREE.Euler(-Math.PI/2, 0, 0)
-    const MESH_OFFSET = new THREE.Vector3(0, 0, 0);          // offset manuale
+    // ✅ Trasformazioni: lasciate “neutre” per NON rompere l’allineamento originale
+    const MESH_SCALE  = 1.0;
+    const MESH_ROT    = new THREE.Euler(0, 0, 0);
+    const MESH_OFFSET = new THREE.Vector3(0, 0, 0);
 
     // -----------------------------
     // VIEWER
@@ -72,7 +74,7 @@
 
     viewer.loadGUI(() => {
       viewer.setLanguage("en");
-      $("#menu_scene").next().show();       // per vedere jstree_scene
+      $("#menu_scene").next().show();       // per vedere jstree_scene (toggle oggetti)
       $("#menu_appearance").next().show();
       // viewer.toggleSidebar();
     });
@@ -94,18 +96,16 @@
     // -----------------------------
     // POINT CLOUD
     // -----------------------------
-    let pcRef = null;
-
     Potree.loadPointCloud(POINTCLOUD_PATH, "Cisterna – Point Cloud", (e) => {
-      pcRef = e.pointcloud;
+      const pc = e.pointcloud;
 
-      viewer.scene.addPointCloud(pcRef);
+      viewer.scene.addPointCloud(pc);
 
-      // Settaggi visuali (adatta a ciò che già usavi)
-      pcRef.material.activeAttributeName = "rgba";
-      pcRef.material.pointSizeType = Potree.PointSizeType.FIXED;
-      pcRef.material.size = 2.0;
-      pcRef.material.minSize = 2;
+      // Settaggi visuali (come usavi tu)
+      pc.material.activeAttributeName = "rgba";
+      pc.material.pointSizeType = Potree.PointSizeType.FIXED;
+      pc.material.size = 2.0;
+      pc.material.minSize = 2;
 
       viewer.fitToScreen();
 
@@ -114,7 +114,7 @@
     });
 
     // -----------------------------
-    // OBJ MESH + Registrazione nella sidebar (jstree_scene)
+    // OBJ MESH + Sidebar toggle (jstree_scene)
     // -----------------------------
     let objMesh = null;
 
@@ -124,31 +124,17 @@
       obj.position.add(MESH_OFFSET);
     }
 
-    // Allineamento “safe”: centra la mesh sulla bounding box della point cloud
-    function autoAlignToPointCloud(pc, obj) {
-      if (!pc) return;
-
-      pc.updateMatrixWorld(true);
-      const pcBox = pc.boundingBox.clone().applyMatrix4(pc.matrixWorld);
-      const pcCenter = pcBox.getCenter(new THREE.Vector3());
-
-      obj.updateMatrixWorld(true);
-      const objBox = new THREE.Box3().setFromObject(obj);
-      const objCenter = objBox.getCenter(new THREE.Vector3());
-
-      obj.position.add(pcCenter.sub(objCenter));
-    }
-
-    function forceSafeMaterial(obj) {
-      // materiale “safe” (se OBJ non ha materiali, o li ha ma non sono web-friendly)
+    // ✅ Correzione texture/materiali:
+    // NON sostituiamo il materiale (così non “perdi” texture/materiali se esistono),
+    // al massimo forziamo DoubleSide per sicurezza.
+    function keepMaterialsButDoubleSide(obj) {
       obj.traverse((child) => {
-        if (child.isMesh) {
-          child.material = new THREE.MeshStandardMaterial({
-            color: 0xcccccc,
-            roughness: 1.0,
-            metalness: 0.0,
-            side: THREE.DoubleSide
-          });
+        if (child.isMesh && child.material) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          for (const m of mats) {
+            m.side = THREE.DoubleSide;
+            m.needsUpdate = true;
+          }
         }
       });
     }
@@ -175,11 +161,18 @@
         OBJ_PATH,
         (object) => {
           objMesh = object;
+
+          // OFF di default
           objMesh.visible = MESH_DEFAULT_VISIBLE;
 
-          forceSafeMaterial(objMesh);
-          applyTransform(objMesh); // lascialo pure, ma con scale=1 rot=0 off=0
-          // autoAlignToPointCloud(pcRef, objMesh); // <-- disattiva
+          // ✅ NON ricentriamo la mesh (evita disallineamento)
+          // autoAlignToPointCloud(...): rimosso volutamente
+
+          // ✅ NON sovrascriviamo i materiali (evita perdita texture)
+          keepMaterialsButDoubleSide(objMesh);
+
+          // trasformazioni neutre (non alterano se lasciate così)
+          applyTransform(objMesh);
 
           viewer.scene.scene.add(objMesh);
           registerInSceneTree("Cisterna – Mesh OBJ", objMesh);
