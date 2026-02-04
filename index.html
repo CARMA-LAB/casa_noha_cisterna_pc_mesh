@@ -37,7 +37,7 @@
     <div id="potree_sidebar_container"></div>
   </div>
 
-  <!-- ✅ MODULE SCRIPT (basato sull'esempio) -->
+  <!-- ✅ MODULE SCRIPT -->
   <script type="module">
     import * as THREE from "./libs/three.js/build/three.module.js";
 
@@ -80,7 +80,7 @@
     });
 
     // -----------------------------
-    // LIGHTS (come esempio)
+    // LIGHTS
     // -----------------------------
     {
       const directional = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -93,6 +93,109 @@
       viewer.scene.scene.add(ambient);
     }
 
+    // =====================
+    // POINT SIZE UI (come nel tuo esempio)
+    // =====================
+    function addPointSizeSliderToAppearance(material){
+
+      const $appearancePanel = $("#menu_appearance").next();
+      if ($appearancePanel.length === 0) {
+        setTimeout(() => addPointSizeSliderToAppearance(material), 200);
+        return;
+      }
+
+      // rimuove blocchi precedenti (se ricarichi)
+      $("#ap_pointsize_block").remove();
+
+      const typeToValue = t =>
+        t === Potree.PointSizeType.ATTENUATED ? "ATTENUATED" :
+        t === Potree.PointSizeType.ADAPTIVE   ? "ADAPTIVE"   : "FIXED";
+
+      const valueToType = v =>
+        v === "ATTENUATED" ? Potree.PointSizeType.ATTENUATED :
+        v === "ADAPTIVE"   ? Potree.PointSizeType.ADAPTIVE   :
+                             Potree.PointSizeType.FIXED;
+
+      const block = $(`
+        <div class="pv-menu-list" id="ap_pointsize_block">
+          <div class="pv-menu-entry">
+
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span>Point size</span>
+              <span id="ap_pointsize_val">${material.size.toFixed(1)}</span>
+            </div>
+
+            <div id="ap_pointsize_slider" style="margin:0 4px;"></div>
+
+            <div id="ap_pointsize_note"
+                 style="margin-top:6px; font-size:11px; color:#999; display:none;">
+              controlled by distance
+            </div>
+
+            <div style="display:flex; justify-content:space-between; margin-top:8px;">
+              <span>Size mode</span>
+              <select id="ap_pointsize_type" style="width:140px;">
+                <option value="FIXED">Fixed</option>
+                <option value="ATTENUATED">Attenuated</option>
+                <option value="ADAPTIVE">Adaptive</option>
+              </select>
+            </div>
+
+          </div>
+        </div>
+      `);
+
+      // inserisci dopo il primo blocco (come nel tuo)
+      const $firstBlock = $appearancePanel.find(".pv-menu-list").first();
+      $firstBlock.after(block);
+
+      $("#ap_pointsize_type").val(typeToValue(material.pointSizeType));
+
+      $("#ap_pointsize_slider").slider({
+        min: 0.5,
+        max: 10,
+        step: 0.1,
+        value: material.size,
+        slide: (e, ui) => {
+          material.size = ui.value;
+          $("#ap_pointsize_val").text(ui.value.toFixed(1));
+        }
+      });
+
+      function applyMode(mode){
+        const $slider = $("#ap_pointsize_slider");
+        const $note = $("#ap_pointsize_note");
+
+        if (mode === "ATTENUATED") {
+          $slider.slider("disable");
+          $note.show();
+          return;
+        }
+
+        $slider.slider("enable");
+        $note.hide();
+
+        if (mode === "ADAPTIVE") {
+          $slider.slider("option", "max", 3);
+          if ($slider.slider("value") > 3) {
+            $slider.slider("value", 3);
+            material.size = 3;
+            $("#ap_pointsize_val").text("3.0");
+          }
+        } else {
+          $slider.slider("option", "max", 10);
+        }
+      }
+
+      applyMode(typeToValue(material.pointSizeType));
+
+      $("#ap_pointsize_type").on("change", function(){
+        const mode = $(this).val();
+        material.pointSizeType = valueToType(mode);
+        applyMode(mode);
+      });
+    }
+
     // -----------------------------
     // POINT CLOUD
     // -----------------------------
@@ -101,11 +204,14 @@
 
       viewer.scene.addPointCloud(pc);
 
-      // Settaggi visuali (come usavi tu)
+      // Settaggi visuali iniziali
       pc.material.activeAttributeName = "rgba";
       pc.material.pointSizeType = Potree.PointSizeType.FIXED;
       pc.material.size = 2.0;
       pc.material.minSize = 2;
+
+      // ✅ aggancia lo slider (stile Rocca)
+      addPointSizeSliderToAppearance(pc.material);
 
       viewer.fitToScreen();
 
@@ -124,7 +230,6 @@
       obj.position.add(MESH_OFFSET);
     }
 
-    // ✅ Correzione texture/materiali:
     // NON sostituiamo il materiale (così non “perdi” texture/materiali se esistono),
     // al massimo forziamo DoubleSide per sicurezza.
     function keepMaterialsButDoubleSide(obj) {
@@ -165,10 +270,7 @@
           // OFF di default
           objMesh.visible = MESH_DEFAULT_VISIBLE;
 
-          // ✅ NON ricentriamo la mesh (evita disallineamento)
-          // autoAlignToPointCloud(...): rimosso volutamente
-
-          // ✅ NON sovrascriviamo i materiali (evita perdita texture)
+          // NON sovrascriviamo i materiali (evita perdita texture)
           keepMaterialsButDoubleSide(objMesh);
 
           // trasformazioni neutre (non alterano se lasciate così)
